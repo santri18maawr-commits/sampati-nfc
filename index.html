@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SAMPATI NFC CLOUD</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body class="bg-slate-900 text-white font-sans min-h-screen">
+
+<header class="bg-slate-950 p-4 border-b border-slate-800 sticky top-0">
+<div class="flex justify-between items-center">
+<div class="flex items-center gap-3">
+<div class="p-2 bg-cyan-600 rounded-lg"><i class="fa-solid fa-id-card"></i></div>
+<div><h1 class="font-bold">SAMPATI NFC</h1><p class="text-xs text-cyan-400">Server: Google Cloud</p></div>
+</div>
+<button onclick="kembali()" id="btn-back" class="hidden bg-slate-700 px-3 py-1 rounded text-xs">← Menu</button>
+</div>
+</header>
+
+<!-- INFO KONVERSI -->
+<div class="p-4 text-center">
+<p class="text-xs text-slate-400">KONVERSI</p>
+<p class="text-lg font-bold text-amber-400">Rp 100 = 1 POIN</p>
+</div>
+
+<!-- MENU -->
+<div id="menu" class="p-4 grid grid-cols-2 gap-3">
+<button onclick="buka('admin')" class="bg-indigo-600 p-4 rounded-xl font-bold">ADMIN<br><span class="text-xs font-normal">Daftar</span></button>
+<button onclick="buka('kios')" class="bg-emerald-600 p-4 rounded-xl font-bold">KIOS<br><span class="text-xs font-normal">Cek</span></button>
+<button onclick="buka('sampah')" class="bg-amber-600 p-4 rounded-xl font-bold">SAMPAH<br><span class="text-xs font-normal">+Poin</span></button>
+<button onclick="buka('medis')" class="bg-rose-600 p-4 rounded-xl font-bold">PUSKESMAS<br><span class="text-xs font-normal">-Poin</span></button>
+</div>
+
+<!-- WORKSPACE -->
+<div id="ws" class="hidden p-4"></div>
+
+<div id="logs" class="p-4 text-xs text-slate-500"></div>
+
+<script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-database-compat.js"></script>
+<script>
+//============================================================
+//📌 GANTI INI:
+//============================================================
+const FIREBASE_URL = "https://sampati-nfc-default-rtdb.asia-southeast1.firebasedatabase.app/";
+const KONVERSI = 100; // Rp 100 = 1 POIN
+//============================================================
+
+firebase.initializeApp({databaseURL: FIREBASE_URL});
+const db = firebase.database();
+let nfcCtrl = null;
+
+function log(x){document.getElementById('logs').innerHTML='['+new Date().toLocaleTimeString()+'] '+x+'<br>'+document.getElementById('logs').innerHTML;}
+
+function kembali(){
+document.getElementById('menu').classList.remove('hidden');
+document.getElementById('ws').classList.add('hidden');
+document.getElementById('btn-back').classList.add('hidden');
+document.getElementById('ws').innerHTML = '';
+if(nfcCtrl){nfcCtrl.abort();nfcCtrl=null;}
+}
+
+function buka(menu){
+document.getElementById('menu').classList.add('hidden');
+document.getElementById('ws').classList.remove('hidden');
+document.getElementById('btn-back').classList.remove('hidden');
+let w=document.getElementById('ws');
+
+if(menu=='admin'){
+w.innerHTML = `
+<div class="bg-slate-800 p-4 rounded-xl">
+<h2 class="font-bold text-indigo-400 mb-3">📝 DAFTAR WARGA BARU</h2>
+<div class="flex gap-2 mb-2">
+<input id="nik" placeholder="NIK 16 Digit" class="flex-1 bg-slate-900 p-3 rounded text-white">
+<button onclick="bukaNFC('nik')" class="bg-cyan-600 px-3 rounded">NFC</button>
+</div>
+<input id="nama" placeholder="Nama Lengkap" class="w-full bg-slate-900 p-3 rounded mb-4 uppercase text-white">
+<button onclick="daftar()" class="w-full bg-indigo-600 p-3 rounded font-bold">DAFTARKAN</button>
+</div>`;
+log('[ADMIN] Buka');
+}
+
+if(menu=='kios'){
+w.innerHTML = `
+<div class="bg-slate-800 p-4 rounded-xl">
+<h2 class="font-bold text-emerald-400 mb-3">🔍 CEK DATA WARGA</h2>
+<div class="flex gap-2 mb-3">
+<input id="cari" placeholder="NIK" class="flex-1 bg-slate-900 p-3 rounded text-white">
+<button onclick="bukaNFC('cari')" class="bg-cyan-600 px-3 rounded">NFC</button>
+</div>
+<button onclick="cek()" class="w-full bg-emerald-600 p-3 rounded font-bold mb-3">CEK DATA</button>
+<div id="hasil" class="hidden mt-3 p-3 bg-slate-700 rounded">
+<p id="hnama" class="font-bold text-lg"></p>
+<p id="hsaldo" class="text-amber-400 text-2xl"></p>
+<p id="hrp" class="text-emerald-400"></p>
+</div>
+</div>`;
+log('[KIOS] Buka');
+}
+
+if(menu=='sampah'){
+w.innerHTML = `
+<div class="bg-slate-800 p-4 rounded-xl">
+<h2 class="font-bold text-amber-400 mb-3">♻️ SETOR SAMPAH (+POIN)</h2>
+<div class="flex gap-2 mb-2">
+<input id="snik" placeholder="NIK" class="flex-1 bg-slate-900 p-3 rounded text-white">
+<button onclick="bukaNFC('snik')" class="bg-cyan-600 px-3 rounded">NFC</button>
+</div>
+<input id="rupiah" placeholder="Masukkan Rupiah (cth: 5000)" type="number" class="w-full bg-slate-900 p-3 rounded mb-2 text-white">
+<p class="text-xs text-slate-400 text-center mb-2">Akan menjadi: <span id="prev-plus" class="text-amber-400 font-bold">0</span> POIN</p>
+<button onclick="setor()" class="w-full bg-amber-600 p-3 rounded font-bold">SIMPAN (+)</button>
+</div>`;
+log('[SAMPAH] Loket terbuka');
+document.getElementById('rupiah').addEventListener('input', function(){
+let u=parseInt(this.value)||0;
+document.getElementById('prev-plus').innerText=Math.floor(u/KONVERSI);
+});
+}
+
+if(menu=='medis'){
+w.innerHTML = `
+<div class="bg-slate-800 p-4 rounded-xl">
+<h2 class="font-bold text-rose-400 mb-3">🏥 PUSKESMAS (-POIN)</h2>
+<div class="flex gap-2 mb-2">
+<input id="mnik" placeholder="NIK" class="flex-1 bg-slate-900 p-3 rounded text-white">
+<button onclick="bukaNFC('mnik')" class="bg-cyan-600 px-3 rounded">NFC</button>
+</div>
+<button onclick="cekMedis()" class="w-full bg-slate-700 p-2 rounded text-xs mb-2">CEK SALDO TERLEBIH</button>
+<div id="medis-info" class="hidden">
+<p id="medis-saldo" class="text-white font-bold mb-2"></p>
+<input id="biaya" placeholder="Biaya Rupiah (cth: 2000)" type="number" class="w-full bg-slate-900 p-3 rounded mb-2 text-white">
+<p class="text-xs text-slate-400 text-center mb-2">Akan mengurangi: <span id="prev-min" class="text-rose-400 font-bold">0</span> POIN</p>
+<textarea id="catatan" placeholder="Diagnosa / Catatan" class="w-full bg-slate-900 p-3 rounded mb-3 h-20 text-white"></textarea>
+<button onclick="bayar()" class="w-full bg-rose-600 p-3 rounded font-bold">BAYAR (-)</button>
+</div>
+</div>`;
+log('[MEDIS] Loket terbuka');
+document.getElementById('biaya').addEventListener('input', function(){
+let u=parseInt(this.value)||0;
+document.getElementById('prev-min').innerText=Math.floor(u/KONVERSI);
+});
+}
+}
+
+function bukaNFC(id){
+document.getElementById(id).value="";
+document.getElementById(id).focus();
+log('[NFC] Siapscan...');
+alert('Tempelkan KTP ke HP\n(Atau ketik manual)');
+}
+
+function daftar(){
+let nik=document.getElementById('nik').value.trim();
+let nama=document.getElementById('nama').value.trim().toUpperCase();
+if(nik.length!=16||!nama)return alert('NIK 16 digit & Nama wajib!');
+db.ref('warga/'+nik).set({nama:nama,saldo:0}).then(()=>{alert('✅ Daftar berhasil!\n'+nama);log('[DAFTAR] '+nik);kembali();});
+}
+
+function cek(){
+let nik=document.getElementById('cari').value.trim();
+if(nik.length!=16)return alert('NIK 16 digit!');
+db.ref('warga/'+nik).get().then(s=>{
+if(s.exists()){
+let d=s.val();
+document.getElementById('hnama').innerText=d.nama;
+document.getElementById('hsaldo').innerText=d.saldo+' POIN';
+document.getElementById('hrp').innerText='Rp '+(d.saldo*KONVERSI).toLocaleString();
+document.getElementById('hasil').classList.remove('hidden');
+log('[CEK] '+nik);
+}else{alert('Data tidak ditemukan!');}
+});
+}
+
+function setor(){
+let nik=document.getElementById('snik').value.trim();
+let uang=parseInt(document.getElementById('rupiah').value);
+if(nik.length!=16||!uang||uang<100)return alert('Minimal Rp 100!');
+let poin=Math.floor(uang/KONVERSI);
+db.ref('warga/'+nik).transaction(s=>s?{...s,saldo:(s.saldo||0)+poin}:null).then(()=>{alert('✅ Berhasil!\nRp '+uang.toLocaleString()+' = +'+poin+' POIN');log('[SAMPAH] +'+poin);kembali();});
+}
+
+let saldoMedis=0;
+function cekMedis(){
+let nik=document.getElementById('mnik').value.trim();
+if(nik.length!=16)return alert('NIK 16 digit!');
+db.ref('warga/'+nik).get().then(s=>{
+if(s.exists()){
+saldoMedis=s.val().saldo||0;
+document.getElementById('medis-saldo').innerText='Saldo: '+saldoMedis+' POIN';
+document.getElementById('medis-info').classList.remove('hidden');
+log('[MEDIS] Cek: '+nik);
+}else{alert('Tidak ditemukan!');}
+});
+}
+
+function bayar(){
+let nik=document.getElementById('mnik').value.trim();
+let uang=parseInt(document.getElementById('biaya').value);
+let cat=document.getElementById('catatan').value.trim();
+if(nik.length!=16||!uang||uang<100||!cat)return alert('Isi lengkap! Minimal Rp 100.');
+let poin=Math.floor(uang/KONVERSI);
+if(saldoMedis<poin)return alert('Saldo tidak cukup!\nSaldo: '+saldoMedis+'\nBiaya: '+poin);
+db.ref('warga/'+nik).transaction(s=>s?{...s,saldo:s.saldo-poin}:null).then(()=>{
+db.ref('warga/'+nik+'/medis').push({tgl:new Date().toLocaleDateString(),catatan:cat,biaya:uang});
+alert('✅ Bayar berhasil!\nRp '+uang.toLocaleString()+' = -'+poin+' POIN');
+log('[MEDIS] -'+poin);
+kembali();
+});
+}
+</script>
+</body>
+</html>
